@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Node / frontend
+node_modules/
+dist/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local data / database
+*.db
+*.sqlite
+*.sqlite3
+skinsight.db
+backend/skinsight.db
+
+# Generated certs and local tooling
+frontend/.certs/
+frontend/certs/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Keep source control files that matter
+!render.yaml
