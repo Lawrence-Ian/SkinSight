@@ -38,6 +38,28 @@
 @media (max-width:900px) { .routine-page { max-width:680px; } }
 @media (max-width:560px) { .routine-page { padding:0 0 34px; }.routine-header { display:block; margin-bottom:24px; }.routine-header h1 { font-size:1.9rem; }.routine-header p { font-size:.9rem; }.routine-latest { display:inline-block; margin-top:16px; }.routine-tabs button { min-height:48px; font-size:.8rem; }.routine-progress { margin-top:20px; padding:19px; }.routine-progress>b { font-size:1.4rem; }.routine-step { min-height:112px; padding:17px 15px; gap:11px; }.routine-step-number { width:39px; height:39px; border-radius:12px; font-size:.8rem; }.routine-step-copy strong { font-size:.88rem; }.routine-step-copy span { font-size:.72rem; }.routine-check { width:29px; height:29px; }.routine-tips { padding:20px; }.routine-tips h2 { font-size:.9rem; } }
 @layer components { .btn-primary { @apply bg-skin-a2 text-white font-semibold px-6 py-3.5 rounded-2xl hover:opacity-90 active:scale-95 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed; } .btn-ghost { @apply bg-skin-card border border-skin-border text-skin-text font-medium px-5 py-3 rounded-2xl hover:border-skin-a1 active:scale-95 transition-all; } .card { @apply bg-white rounded-3xl border border-skin-border shadow-[0_4px_24px_rgba(61,43,31,0.09)] p-5; } .card-soft { @apply bg-skin-card rounded-3xl border border-skin-border p-5; } .input-field { @apply w-full bg-skin-bg border border-skin-border rounded-2xl px-4 py-3.5 text-skin-text placeholder-skin-muted focus:outline-none focus:ring-2 focus:ring-skin-a2 focus:border-transparent transition-all; } }
+
+.nearby-care-page .leaflet-popup-content-wrapper,
+.nearby-care-page .leaflet-popup-tip {
+  background: #fff;
+}
+
+.nearby-care-page .leaflet-popup-content {
+  color: #211d1d;
+}
+
+.nearby-care-page .leaflet-popup-content p {
+  color: #66544b;
+}
+
+.nearby-care-page .leaflet-popup-content p:first-child {
+  color: #211d1d;
+}
+
+.nearby-care-page .leaflet-popup-content a {
+  color: #fff !important;
+  text-decoration: none;
+}
 .profile-page { max-width:860px; margin:0 auto; padding:8px 0 40px; }
 .profile-header { display:flex; align-items:flex-end; gap:18px; margin-bottom:26px; }
 .profile-back { display:inline-flex; align-items:center; gap:8px; padding:8px 14px; border:1px solid var(--line); border-radius:999px; background:#fff; color:var(--text); }

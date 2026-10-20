@@ -17,8 +17,6 @@ OVERPASS_URLS = (
     "https://overpass.kumi.systems/api/interpreter",
 )
 OVERPASS_CACHE_TTL_SECONDS = 300
-MAX_SEARCH_RADIUS_KM = 5
-MAX_RESULTS_PER_TYPE = 5
 _overpass_cache = {}
 
 # Haversine distance formula (km)
@@ -41,7 +39,7 @@ def _fallback_places(lat: float, lng: float, radius_km: int):
                 (clinics if place_type == "clinic" else stores).append(item)
     clinics.sort(key=lambda item: item["distance_km"])
     stores.sort(key=lambda item: item["distance_km"])
-    return clinics[:MAX_RESULTS_PER_TYPE], stores[:MAX_RESULTS_PER_TYPE]
+    return clinics[:10], stores[:10]
 
 def _normalize_osm_element(element, lat: float, lng: float):
     tags = element.get("tags", {})
@@ -185,7 +183,7 @@ class PlaceItem(BaseModel):
 async def get_nearby_places(
     lat: float = Query(..., description="User latitude"),
     lng: float = Query(..., description="User longitude"),
-    radius_km: int = Query(5, description="Search radius in km, capped at 5"),
+    radius_km: int = Query(100, description="Search radius in km"),
     type_filter: str = Query("all", description="Filter by 'clinic', 'store', or 'all'")
 ):
     """
@@ -196,8 +194,7 @@ async def get_nearby_places(
     if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
         raise HTTPException(status_code=400, detail="Invalid coordinates")
     
-    radius_km = min(max(radius_km, 1), MAX_SEARCH_RADIUS_KM)
-    cache_key = (round(lat, 3), round(lng, 3), radius_km)
+    cache_key = (round(lat, 3), round(lng, 3), min(max(radius_km, 1), 50))
     cached = _overpass_cache.get(cache_key)
     if cached and time.monotonic() - cached["created_at"] < OVERPASS_CACHE_TTL_SECONDS:
         clinics, stores = cached["clinics"], cached["stores"]
@@ -208,8 +205,8 @@ async def get_nearby_places(
             places = [place for place in normalized if place and place["distance_km"] <= radius_km]
             seen = set()
             places = [place for place in places if not (place["place_id"] in seen or seen.add(place["place_id"]))]
-            clinics = sorted((place for place in places if place["type"] == "clinic"), key=lambda item: item["distance_km"])[:MAX_RESULTS_PER_TYPE]
-            stores = sorted((place for place in places if place["type"] == "store"), key=lambda item: item["distance_km"])[:MAX_RESULTS_PER_TYPE]
+            clinics = sorted((place for place in places if place["type"] == "clinic"), key=lambda item: item["distance_km"])[:50]
+            stores = sorted((place for place in places if place["type"] == "store"), key=lambda item: item["distance_km"])[:50]
             _overpass_cache[cache_key] = {"created_at": time.monotonic(), "clinics": clinics, "stores": stores}
         except (httpx.HTTPError, ValueError) as error:
             print(f"OpenStreetMap nearby search failed: {error}")
@@ -225,8 +222,8 @@ async def get_nearby_places(
     return {
         "user_location": {"lat": lat, "lng": lng},
         "search_radius_km": radius_km,
-        "clinics": clinics[:MAX_RESULTS_PER_TYPE],
-        "stores": stores[:MAX_RESULTS_PER_TYPE],
+        "clinics": clinics[:50],
+        "stores": stores[:50],
         "total_clinics": len(clinics),
         "total_stores": len(stores)
     }
