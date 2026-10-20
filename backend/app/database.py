@@ -27,7 +27,20 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
 DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[1] / "skinsight.db"
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}")
+
+
+def _database_url():
+    configured_url = os.getenv("DATABASE_URL")
+    if not configured_url:
+        return f"sqlite:///{DEFAULT_DATABASE_PATH.as_posix()}"
+    if configured_url.startswith("postgres://"):
+        return configured_url.replace("postgres://", "postgresql+psycopg://", 1)
+    if configured_url.startswith("postgresql://"):
+        return configured_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return configured_url
+
+
+DATABASE_URL = _database_url()
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
