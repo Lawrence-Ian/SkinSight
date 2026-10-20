@@ -13,7 +13,6 @@ EMERGENCY_KEYWORDS = [
     r"hives.*severe|urticaria.*spread|swelling.*face|swelling.*lips",
     r"necrosis|tissue.*death|skin.*blackening|gangrene",
     r"lesion.*changing.*rapidly|mole.*bleeding|mole.*growing.*fast",
-    r"acne.*cystic.*severe|cystic.*acne.*scarring|acne.*emergency",
     r"Stevens.*Johnson|toxic.*epidermal|TEN syndrome",
     r"pemphigus|bullous.*pemphigoid|severe.*blistering",
 ]
@@ -54,11 +53,6 @@ RULES = {
     r"hello|hi|hey|greetings": [
         "Hi! 🌸 I'm Sage, your SKINSIGHT skincare assistant. I provide health information based on legitimate sources like Mayo Clinic, AAD, and CDC. Ask me about skincare, ingredients, or routines — or go to the Scan tab to analyze your skin live!",
         "Hello! 🌸 How can I help your skin today? I can discuss skincare routines, ingredients, and conditions based on medical sources.",
-    ],
-
-    # Acne & Breakouts
-    r"acne|pimple|breakout|zit|whitehead|blackhead": [
-        "Acne Management (Based on AAD & Mayo Clinic) 🔍\n\n**What Causes It:**\n• Excess sebum + dead skin cells + bacteria (C. acnes)\n• Hormones, stress, diet (high glycemic index)\n\n**Treatment Options:**\n• Salicylic acid 0.5–2%: Unclogs pores\n• Benzoyl peroxide 2.5–5%: Kills bacteria\n• Niacinamide 10%: Reduces sebum\n• Retinoids: Prevent clogging\n\n**Prevention:**\n• Change pillowcases every 2 days\n• NEVER pop pimples (risk of scarring & infection)\n• Use non-comedogenic products\n• Don't skip moisturizer\n\n**When to see a dermatologist:** If moderate acne persists after 8–12 weeks of OTC treatment.\n\nSource: American Academy of Dermatology",
     ],
 
     # Oily Skin
@@ -108,7 +102,7 @@ RULES = {
 
     # How SKINSIGHT Works
     r"scan|camera|how.*work|analyze|cnn|model|detection": [
-        "How SKINSIGHT Works 📱\n\n**Live Camera Technology:**\n• Uses CNN (Convolutional Neural Network) model\n• Analyzes your live camera frame in REAL-TIME\n• No photo uploads — processing happens locally\n\n**What SKINSIGHT Detects:**\n✓ Acne-prone skin\n✓ Oily skin\n✓ Dry skin\n✓ Normal/balanced skin\n\n**How to Scan:**\n1. Tap the **Scan** tab 📸\n2. Allow camera permission\n3. Position your face in the oval guide\n4. Ensure good lighting\n5. Hold still & tap **Capture**\n\n**After Scan:**\n✓ Instant condition detection + confidence % \n✓ Personalized routine (morning/night steps)\n✓ Branded product recommendations\n✓ Professional tips based on dermatology sources\n✓ Scan saved to your history\n\n**Important Note:**\n⚠️ SKINSIGHT is a **screening tool**, not a diagnostic tool. For persistent skin issues, consult a board-certified dermatologist.\n\nSource: SKINSIGHT Medical Team",
+        "How SKINSIGHT Works 📱\n\n**Live Camera Technology:**\n• Uses CNN (Convolutional Neural Network) model\n• Analyzes your live camera frame in REAL-TIME\n• No photo uploads — processing happens locally\n\n**What SKINSIGHT Detects:**\n✓ Oily skin\n✓ Dry skin\n✓ Normal/balanced skin\n\n**How to Scan:**\n1. Tap the **Scan** tab 📸\n2. Allow camera permission\n3. Position your face in the oval guide\n4. Ensure good lighting\n5. Hold still & tap **Capture**\n\n**After Scan:**\n✓ Instant condition detection + confidence % \n✓ Personalized routine (morning/night steps)\n✓ Branded product recommendations\n✓ Professional tips based on dermatology sources\n✓ Scan saved to your history\n\n**Important Note:**\n⚠️ SKINSIGHT is a **screening tool**, not a diagnostic tool. For persistent skin issues, consult a board-certified dermatologist.\n\nSource: SKINSIGHT Medical Team",
     ],
 
     # Nutrition & Diet

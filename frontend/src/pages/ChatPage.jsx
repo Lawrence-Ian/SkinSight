@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { Send, RotateCcw, Sparkles, History, Trash2, Menu, X } from 'lucide-react'
 import { chatAPI } from '../utils/api'
 
-const QUICK = ['How to treat acne?','Best sunscreen tips','What is retinol?','Night skincare routine','Foods for healthy skin','How does the camera scan work?']
+const QUICK = ['Best cleanser for oily skin','Best sunscreen tips','What is retinol?','Night skincare routine','Foods for healthy skin','How does the camera scan work?']
 
 const INIT = [{
   id: 1, role:'bot',

@@ -5,8 +5,7 @@ import { Trash2, RefreshCw, TrendingUp, Camera } from 'lucide-react'
 import { historyAPI } from '../utils/api'
 
 const META = {
-  acne:   { emoji:'🔴', label:'Acne',   color:'#C0504D' },
-  oily:   { emoji:'✨', label:'Oily',    color:'#B8860B' },
+  oily:   { emoji:'✨', label:'Oily',   color:'#B8860B' },
   dry:    { emoji:'💙', label:'Dry',     color:'#1565C0' },
   normal: { emoji:'💚', label:'Normal',  color:'#2E7D32' },
 }

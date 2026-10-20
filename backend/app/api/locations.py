@@ -5,11 +5,21 @@ Uses real-world clinic data and calculated distances.
 """
 
 from fastapi import APIRouter, HTTPException, Query
+import httpx
+import time
 from pydantic import BaseModel
 from math import radians, sin, cos, sqrt, atan2
 from typing import List
 
 router = APIRouter()
+OVERPASS_URLS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+)
+OVERPASS_CACHE_TTL_SECONDS = 300
+MAX_SEARCH_RADIUS_KM = 5
+MAX_RESULTS_PER_TYPE = 5
+_overpass_cache = {}
 
 # Haversine distance formula (km)
 def get_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -19,6 +29,84 @@ def get_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     a = sin(dLat/2) * sin(dLat/2) + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLng/2) * sin(dLng/2)
     c = 2 * atan2(sqrt(a), sqrt(1-a))
     return R * c
+
+def _fallback_places(lat: float, lng: float, radius_km: int):
+    clinics = []
+    stores = []
+    for place_type, source in (("clinic", DERMATOLOGY_CLINICS), ("store", SKINCARE_STORES)):
+        for place in source:
+            distance = get_distance(lat, lng, place["lat"], place["lng"])
+            if distance <= radius_km:
+                item = {**place, "distance_km": round(distance, 2), "source": "curated"}
+                (clinics if place_type == "clinic" else stores).append(item)
+    clinics.sort(key=lambda item: item["distance_km"])
+    stores.sort(key=lambda item: item["distance_km"])
+    return clinics[:MAX_RESULTS_PER_TYPE], stores[:MAX_RESULTS_PER_TYPE]
+
+def _normalize_osm_element(element, lat: float, lng: float):
+    tags = element.get("tags", {})
+    center = element.get("center", {})
+    place_lat = element.get("lat", center.get("lat"))
+    place_lng = element.get("lon", center.get("lon"))
+    if place_lat is None or place_lng is None:
+        return None
+
+    healthcare = tags.get("healthcare", "")
+    is_clinic = (
+        tags.get("amenity") in {"clinic", "hospital", "doctors", "outpatient"} or
+        healthcare in {"clinic", "dermatology", "doctor", "hospital", "specialist", "centre", "center"}
+    )
+    is_store = tags.get("amenity") == "pharmacy" or tags.get("shop") in {
+        "beauty", "cosmetics", "chemist", "department_store", "supermarket"
+    }
+    if not is_clinic and not is_store:
+        return None
+
+    place_type = "clinic" if is_clinic else "store"
+    distance = get_distance(lat, lng, float(place_lat), float(place_lng))
+    address_parts = [
+        tags.get("addr:housenumber"),
+        tags.get("addr:street"),
+        tags.get("addr:city") or tags.get("addr:town") or tags.get("addr:village")
+    ]
+    address = " ".join(part for part in address_parts if part) or "Address unavailable"
+    osm_id = f'{element.get("type", "node")}/{element.get("id")}'
+    return {
+        "name": tags.get("name") or ("Dermatology clinic" if place_type == "clinic" else "Skincare store"),
+        "lat": float(place_lat),
+        "lng": float(place_lng),
+        "type": place_type,
+        "desc": "OpenStreetMap-listed dermatology or healthcare location." if place_type == "clinic"
+            else "OpenStreetMap-listed pharmacy or beauty store. Confirm product stock before visiting.",
+        "distance_km": round(distance, 2),
+        "address": address,
+        "phone": tags.get("phone") or tags.get("contact:phone") or "Phone unavailable",
+        "place_id": osm_id,
+        "maps_url": f"https://www.openstreetmap.org/{osm_id}",
+        "source": "openstreetmap"
+    }
+
+async def _fetch_osm_places(lat: float, lng: float, radius_km: int):
+    radius_m = min(max(radius_km, 1), 50) * 1000
+    query = f"""
+[out:json][timeout:20];
+(
+  nwr(around:{radius_m},{lat},{lng})["amenity"~"pharmacy|clinic|hospital|doctors|outpatient"];
+  nwr(around:{radius_m},{lat},{lng})["healthcare"~"clinic|dermatology|doctor|hospital|specialist|centre|center"];
+  nwr(around:{radius_m},{lat},{lng})["shop"~"beauty|cosmetics|chemist|department_store|supermarket"];
+);
+out center tags;
+"""
+    async with httpx.AsyncClient(timeout=65, headers={"User-Agent": "SkinSight/2.0 nearby locations"}) as client:
+        last_error = None
+        for endpoint in OVERPASS_URLS:
+            try:
+                response = await client.get(endpoint, params={"data": query})
+                response.raise_for_status()
+                return response.json().get("elements", [])
+            except httpx.HTTPError as error:
+                last_error = error
+        raise last_error or httpx.HTTPError("No Overpass endpoint was available")
 
 # Real dermatology clinics worldwide (verified locations with actual dermatology departments)
 DERMATOLOGY_CLINICS = [
@@ -97,7 +185,7 @@ class PlaceItem(BaseModel):
 async def get_nearby_places(
     lat: float = Query(..., description="User latitude"),
     lng: float = Query(..., description="User longitude"),
-    radius_km: int = Query(100, description="Search radius in km"),
+    radius_km: int = Query(5, description="Search radius in km, capped at 5"),
     type_filter: str = Query("all", description="Filter by 'clinic', 'store', or 'all'")
 ):
     """
@@ -108,36 +196,37 @@ async def get_nearby_places(
     if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
         raise HTTPException(status_code=400, detail="Invalid coordinates")
     
-    clinics = []
-    stores = []
-    
-    # Filter and sort clinics
-    if type_filter in ["all", "clinic"]:
-        for clinic in DERMATOLOGY_CLINICS:
-            dist = get_distance(lat, lng, clinic['lat'], clinic['lng'])
-            if dist <= radius_km:
-                clinics.append({
-                    **clinic,
-                    "distance_km": round(dist, 1)
-                })
-        clinics.sort(key=lambda x: x['distance_km'])
-    
-    # Filter and sort stores
-    if type_filter in ["all", "store"]:
-        for store in SKINCARE_STORES:
-            dist = get_distance(lat, lng, store['lat'], store['lng'])
-            if dist <= radius_km:
-                stores.append({
-                    **store,
-                    "distance_km": round(dist, 1)
-                })
-        stores.sort(key=lambda x: x['distance_km'])
+    radius_km = min(max(radius_km, 1), MAX_SEARCH_RADIUS_KM)
+    cache_key = (round(lat, 3), round(lng, 3), radius_km)
+    cached = _overpass_cache.get(cache_key)
+    if cached and time.monotonic() - cached["created_at"] < OVERPASS_CACHE_TTL_SECONDS:
+        clinics, stores = cached["clinics"], cached["stores"]
+    else:
+        try:
+            elements = await _fetch_osm_places(lat, lng, radius_km)
+            normalized = [_normalize_osm_element(element, lat, lng) for element in elements]
+            places = [place for place in normalized if place and place["distance_km"] <= radius_km]
+            seen = set()
+            places = [place for place in places if not (place["place_id"] in seen or seen.add(place["place_id"]))]
+            clinics = sorted((place for place in places if place["type"] == "clinic"), key=lambda item: item["distance_km"])[:MAX_RESULTS_PER_TYPE]
+            stores = sorted((place for place in places if place["type"] == "store"), key=lambda item: item["distance_km"])[:MAX_RESULTS_PER_TYPE]
+            _overpass_cache[cache_key] = {"created_at": time.monotonic(), "clinics": clinics, "stores": stores}
+        except (httpx.HTTPError, ValueError) as error:
+            print(f"OpenStreetMap nearby search failed: {error}")
+            clinics, stores = _fallback_places(lat, lng, radius_km)
+
+    if not clinics and not stores:
+        clinics, stores = _fallback_places(lat, lng, radius_km)
+    if type_filter == "clinic":
+        stores = []
+    elif type_filter == "store":
+        clinics = []
     
     return {
         "user_location": {"lat": lat, "lng": lng},
         "search_radius_km": radius_km,
-        "clinics": clinics[:10],  # Top 10 nearest clinics
-        "stores": stores[:10],    # Top 10 nearest stores
+        "clinics": clinics[:MAX_RESULTS_PER_TYPE],
+        "stores": stores[:MAX_RESULTS_PER_TYPE],
         "total_clinics": len(clinics),
         "total_stores": len(stores)
     }

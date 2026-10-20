@@ -1,4 +1,4 @@
-import { ArrowLeft, Mail, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
+import { Mail, ShieldCheck, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
@@ -32,10 +32,6 @@ export default function ProfilePage() {
   return (
     <div className="profile-page">
       <div className="profile-header">
-        <button className="profile-back" onClick={() => navigate('/dashboard')}>
-          <ArrowLeft size={18} />
-          <span>Back</span>
-        </button>
         <div>
           <p className="dashboard-eyebrow">Your account</p>
           <h1>Profile</h1>

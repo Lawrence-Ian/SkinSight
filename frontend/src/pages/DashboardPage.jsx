@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, Camera, Check, CircleAlert, Crosshair, Droplets, RefreshCw, ShieldCheck, Sparkles, Zap, Info, FlipHorizontal } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { analysisAPI, historyAPI } from '../utils/api'
+import { detectFaces, getFaceDetector } from '../utils/faceDetector'
 
 const COUNTDOWN_SEC = 3
 
@@ -22,6 +23,7 @@ export default function DashboardPage({ scannerOnly = false }) {
   const canvasRef         = useRef(null)
   const streamRef         = useRef(null)
   const faceDetectorRef   = useRef(null)
+  const faceDetectorPromiseRef = useRef(null)
 
   const [camState, setCamState]   = useState('idle')   // idle | requesting | live | countdown | capturing | error
   const [facingMode, setFacingMode] = useState('user')
@@ -34,6 +36,8 @@ export default function DashboardPage({ scannerOnly = false }) {
   const [timeGreeting, setTimeGreeting] = useState(getTimeGreeting)
   const [detection, setDetection] = useState({
     facePosition: 'Searching',
+    faceCount: 0,
+    faceDetectionAvailable: false,
     lighting: 'Checking',
     clarity: 'Checking',
     distance: 'Checking',
@@ -78,7 +82,14 @@ export default function DashboardPage({ scannerOnly = false }) {
 
   useEffect(() => {
     if (!showScanner || (camState !== 'live' && camState !== 'countdown')) {
-      setDetection({ facePosition: 'Searching', lighting: 'Checking', clarity: 'Checking', distance: 'Checking' })
+      setDetection({
+        facePosition: 'Searching',
+        faceCount: 0,
+        faceDetectionAvailable: false,
+        lighting: 'Checking',
+        clarity: 'Checking',
+        distance: 'Checking',
+      })
       return undefined
     }
 
@@ -113,29 +124,42 @@ export default function DashboardPage({ scannerOnly = false }) {
       const clarity = averageEdgeChange > 18 && brightnessVariance > 260 ? 'Sharp' : averageEdgeChange > 9 ? 'Fair' : 'Blurry'
 
       let facePosition = 'Searching'
+      let faceCount = 0
+      let faceDetectionAvailable = Boolean(faceDetectorRef.current)
       let distance = 'Checking'
-      if (typeof window.FaceDetector === 'function') {
-        try {
-          if (!faceDetectorRef.current) faceDetectorRef.current = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 })
-          const faces = await faceDetectorRef.current.detect(canvas)
-          const face = faces[0]
-          if (face?.boundingBox) {
-            const box = face.boundingBox
-            const centerX = (box.x + (box.width / 2)) / canvas.width
-            const centerY = (box.y + (box.height / 2)) / canvas.height
-            facePosition = Math.abs(centerX - 0.5) < 0.16 && Math.abs(centerY - 0.5) < 0.2 ? 'Centered' : 'Reposition'
-            const faceArea = (box.width * box.height) / (canvas.width * canvas.height)
-            distance = faceArea < 0.12 ? 'Move Closer' : faceArea > 0.55 ? 'Move Back' : 'Optimal'
-          }
-        } catch {
-          faceDetectorRef.current = null
+      try {
+        if (!faceDetectorRef.current) {
+          if (!faceDetectorPromiseRef.current) faceDetectorPromiseRef.current = getFaceDetector()
+          faceDetectorRef.current = await faceDetectorPromiseRef.current
         }
-      } else {
-        facePosition = 'Camera Ready'
-        distance = 'Camera Ready'
+        const faces = await detectFaces(faceDetectorRef.current, canvas)
+        faceDetectionAvailable = true
+        faceCount = faces.length
+        const face = faces[0]
+        if (faces.length === 0) {
+          facePosition = 'No Face'
+        } else if (faces.length > 1) {
+          facePosition = 'Multiple Faces'
+        } else if (face?.boundingBox) {
+          const box = face.boundingBox
+          const centerX = box.originX + (box.width / 2)
+          const centerY = box.originY + (box.height / 2)
+          facePosition = Math.abs(centerX - (canvas.width / 2)) < canvas.width * 0.16 &&
+            Math.abs(centerY - (canvas.height / 2)) < canvas.height * 0.2
+            ? 'Centered'
+            : 'Reposition'
+          const faceArea = (box.width * box.height) / (canvas.width * canvas.height)
+          distance = faceArea < 0.12 ? 'Move Closer' : faceArea > 0.55 ? 'Move Back' : 'Optimal'
+        }
+      } catch (detectorError) {
+        console.error('Face detector error:', detectorError)
+        faceDetectorRef.current = null
+        faceDetectorPromiseRef.current = null
+        facePosition = 'Face Detection Unavailable'
+        faceDetectionAvailable = false
       }
 
-      setDetection({ facePosition, lighting, clarity, distance })
+      setDetection({ facePosition, faceCount, faceDetectionAvailable, lighting, clarity, distance })
     }
 
     const timer = window.setInterval(measureFrame, 700)
@@ -155,6 +179,10 @@ export default function DashboardPage({ scannerOnly = false }) {
     }
 
     try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Camera access requires HTTPS or localhost in a supported browser.')
+      }
+
       // Try with flexible constraints first (mobile compatibility)
       let constraints = {
         video: {
@@ -232,6 +260,28 @@ export default function DashboardPage({ scannerOnly = false }) {
   // ── Capture after countdown ───────────────────────────────────────────────
   const beginCapture = () => {
     if (camState !== 'live') return
+    const faceCheckRequired = detection.faceDetectionAvailable
+    const captureBlocked =
+      !streamRef.current ||
+      detection.lighting !== 'Good' ||
+      (faceCheckRequired && (detection.facePosition !== 'Centered' || detection.faceCount !== 1))
+    if (captureBlocked) {
+      if (!streamRef.current) {
+        setError('Camera is unavailable. Please start the camera again.')
+      } else if (detection.lighting === 'Too Dark' || detection.lighting === 'Checking') {
+        setError('Please move to a brighter area before capturing.')
+      } else if (detection.lighting !== 'Good') {
+        setError('Please reduce the lighting or glare before capturing.')
+      } else if (detection.faceCount === 0 || detection.facePosition === 'No Face') {
+        setError('Position one face inside the guide before capturing.')
+      } else if (detection.faceCount > 1 || detection.facePosition === 'Multiple Faces') {
+        setError('Only one face may be visible before capturing.')
+      } else if (detection.facePosition !== 'Centered') {
+        setError('Center one face inside the guide before capturing.')
+      }
+      return
+    }
+    setError('')
     setCamState('countdown')
     let count = COUNTDOWN_SEC
     setCountdown(count)
@@ -249,6 +299,17 @@ export default function DashboardPage({ scannerOnly = false }) {
 
   // ── Capture frame & send to backend ──────────────────────────────────────
   const captureAndAnalyze = async () => {
+    if (
+      !streamRef.current ||
+      detection.lighting !== 'Good' ||
+      (detection.faceDetectionAvailable && (detection.facePosition !== 'Centered' || detection.faceCount !== 1))
+    ) {
+      setError('Camera conditions changed. Keep one face centered in good lighting and try again.')
+      setCountdown(0)
+      setCamState('live')
+      return
+    }
+
     setCamState('capturing')
     setAnalyzing(true)
     setError('')
@@ -307,10 +368,10 @@ export default function DashboardPage({ scannerOnly = false }) {
   if (!showScanner) {
     return (
       <div className="dashboard-home">
-        <div className="dashboard-heading"><div><p className="dashboard-eyebrow">☕ {timeGreeting}</p><h1>{user?.name || 'Welcome back'}</h1><p>Ready to check your skin today?</p></div><span className="skin-status"><i /> Combination Skin</span></div>
+        <div className="dashboard-heading"><div><p className="dashboard-eyebrow">☕ {timeGreeting}</p><h1>{user?.name || 'Welcome back'}</h1><p>Ready to check your skin today?</p></div><span className="skin-status"><i /> Skin analysis ready</span></div>
         <section className="dashboard-hero-card"><div><p>Last scan: Sep 15</p><h2>Start Skin Analysis</h2><span>Get an updated reading of your skin with our AI<br className="desktop-only" /> scanner.</span><button onClick={() => navigate('/analysis')}><Camera size={17} /> Analyze Now <Sparkles size={15} /></button></div><div className="hero-rings"><span /><span /></div></section>
         <section className="dashboard-stats"><article><strong className="gold-number">{recentanalysis.length}</strong><b>Total Scans</b><span>Analysis done</span></article></section>
-        <div className="dashboard-grid"><div className="dashboard-main-column"><section className="dashboard-panel quick-actions"><h2>Quick Actions</h2><div><button onClick={() => navigate('/analysis')}><span className="action-icon pink-bg"><Camera /></span><b>Analyze Skin</b></button><button onClick={() => navigate('/routine')}><span className="action-icon mint-bg"><Check /></span><b>My Routine</b></button><button onClick={() => navigate('/map')}><span className="action-icon blue-bg"><Droplets /></span><b>Find Care</b></button><button onClick={() => navigate('/history')}><span className="action-icon gold-bg"><Sparkles /></span><b>History</b></button></div></section><section className="dashboard-panel recent-panel"><h2>Recent Analysis</h2>{[['76','Sep 15','Acne 34% · Oiliness 59% · Dryness 33%'],['72','Sep 14','Acne 30% · Oiliness 55% · Dryness 25%'],['68','Aug 31','Acne 40% · Oiliness 45% · Dryness 35%']].map(([score,date,details]) => <div className="analysis-row" key={date}><span className="score-ring">{score}</span><div><b>Combination Skin</b><p>{details}</p></div><time>{date}</time></div>)}</section></div><aside className="dashboard-side-column"><section className="dashboard-panel profile-panel"><h2>Skin Profile</h2><div><span>Skin Type</span><b>Combination</b></div><div><span>AI Confidence</span><b>94.1%</b></div><button onClick={() => navigate('/analysis')}>Update Analysis</button></section><section className="dashboard-panel tips-panel"><h2>Skincare Tips</h2><div><Droplets /><p><b>Stay Hydrated</b><span>Drink at least 8 glasses of water daily for plump, healthy-looking skin.</span></p></div><div><CircleAlert /><p><b>Never Skip SPF</b><span>UV damage is the #1 cause of premature skin aging.</span></p></div></section></aside></div>
+        <div className="dashboard-grid"><div className="dashboard-main-column"><section className="dashboard-panel quick-actions"><h2>Quick Actions</h2><div><button onClick={() => navigate('/analysis')}><span className="action-icon pink-bg"><Camera /></span><b>Analyze Skin</b></button><button onClick={() => navigate('/routine')}><span className="action-icon mint-bg"><Check /></span><b>My Routine</b></button><button onClick={() => navigate('/map')}><span className="action-icon blue-bg"><Droplets /></span><b>Find Care</b></button><button onClick={() => navigate('/history')}><span className="action-icon gold-bg"><Sparkles /></span><b>History</b></button></div></section><section className="dashboard-panel recent-panel"><h2>Recent Analysis</h2>{[['76','Sep 15','Oily 59% · Dryness 33% · Normal 8%'],['72','Sep 14','Oily 55% · Dryness 25% · Normal 20%'],['68','Aug 31','Oily 45% · Dryness 35% · Normal 20%']].map(([score,date,details]) => <div className="analysis-row" key={date}><span className="score-ring">{score}</span><div><b>Skin Type Analysis</b><p>{details}</p></div><time>{date}</time></div>)}</section></div><aside className="dashboard-side-column"><section className="dashboard-panel profile-panel"><h2>Skin Profile</h2><div><span>Skin Type</span><b>Not analyzed</b></div><div><span>AI Confidence</span><b>—</b></div><button onClick={() => navigate('/analysis')}>Update Analysis</button></section><section className="dashboard-panel tips-panel"><h2>Skincare Tips</h2><div><Droplets /><p><b>Stay Hydrated</b><span>Drink at least 8 glasses of water daily for plump, healthy-looking skin.</span></p></div><div><CircleAlert /><p><b>Never Skip SPF</b><span>UV damage is the #1 cause of premature skin aging.</span></p></div></section></aside></div>
       </div>
     )
   }
@@ -332,9 +393,17 @@ export default function DashboardPage({ scannerOnly = false }) {
             </div>
             <div className="analysis-camera-actions">
               {camState === 'idle' && <button className="analysis-start" onClick={() => startCamera()}><Camera size={18} /> Start Skin Analysis</button>}
-              {camState === 'live' && <button className="analysis-start" onClick={beginCapture}><Camera size={18} /> Start Skin Analysis</button>}
+              {camState === 'live' && <button className="analysis-start" onClick={beginCapture} disabled={!streamRef.current || detection.lighting !== 'Good' || (detection.faceDetectionAvailable && (detection.facePosition !== 'Centered' || detection.faceCount !== 1))}><Camera size={18} /> Start Skin Analysis</button>}
               {camState === 'countdown' && <button className="analysis-start" disabled><Camera size={18} /> Hold still...</button>}
-              <p className="analysis-helper">Hold still for 3 seconds while scanning</p>
+              <p className="analysis-helper">
+                {camState === 'live' && !detection.faceDetectionAvailable && detection.lighting === 'Good'
+                  ? 'Good lighting detected — center your face in the guide'
+                  : camState === 'live' && detection.facePosition !== 'Centered'
+                  ? 'Center one face inside the guide before starting the scan'
+                  : camState === 'live' && detection.lighting !== 'Good'
+                  ? 'Good lighting is required before starting the scan'
+                  : 'Hold still for 3 seconds while scanning'}
+              </p>
             </div>
           </section>
           <section className="analysis-details">

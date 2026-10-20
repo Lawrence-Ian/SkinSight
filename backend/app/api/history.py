@@ -24,14 +24,17 @@ def _saved_products(scan):
         if product is None:
             continue
         catalog_product = current_products.get(product.name)
-        if catalog_product is None or product.brand:
+        if catalog_product is None:
             return recommendations
         saved.append({
             "name": product.name,
+            "brand": product.brand or catalog_product.get("brand"),
             "ingredient": product.ingredients,
             "purpose": product.description,
             "price_range": catalog_product["price_range"],
             "dermatologist_recommendation": recommendation.recommendation_reason,
+            "image_url": catalog_product.get("image_url"),
+            "product_url": catalog_product.get("product_url"),
         })
     return saved or recommendations
 

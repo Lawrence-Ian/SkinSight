@@ -4,7 +4,6 @@ import { historyAPI, routineAPI } from '../utils/api'
 import { Check, ChevronLeft, Moon, Sun } from 'lucide-react'
 
 const META = {
-  acne: { color: '#c97888', label: 'Acne' },
   oily: { color: '#b8860b', label: 'Oily' },
   dry: { color: '#4d86b5', label: 'Dry' },
   normal: { color: '#4f917f', label: 'Normal' },

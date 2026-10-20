@@ -309,6 +309,7 @@ def persist_scan_recommendations(db, scan, condition, products):
         if product is None:
             product = Product(
                 name=recommended_product["name"],
+                brand=recommended_product.get("brand"),
                 description=recommended_product.get("purpose"),
                 ingredients=recommended_product.get("ingredient"),
                 skin_type=condition,

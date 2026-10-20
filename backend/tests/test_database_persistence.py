@@ -62,23 +62,26 @@ def test_scan_saves_history_and_recommended_products(tmp_path, monkeypatch):
     assert {item["name"] for item in restored["products"]} == {
         item["name"] for item in payload["products"]
     }
-    assert all("brand" not in item for item in payload["products"])
+    assert all(item["brand"] for item in payload["products"])
     assert all(item["price_range"] for item in payload["products"])
-    assert all("brand" not in item for item in restored["products"])
+    assert all(item["brand"] for item in restored["products"])
     db.close()
 
 
-def test_recommendations_are_single_budget_friendly_products():
+def test_recommendations_include_specific_brands_and_price_ranges():
+    product_sets = []
     for recommendation in (
-        get_recommendation("acne"),
         get_recommendation("oily"),
         get_recommendation("dry"),
         get_recommendation("normal"),
     ):
-        assert len(recommendation["products"]) == 1
+        assert len(recommendation["products"]) == 3
         product = recommendation["products"][0]
-        assert "brand" not in product
-        assert product["price_range"].startswith("₱100")
+        assert product["brand"]
+        assert product["price_range"].startswith("₱")
+        product_sets.append({item["name"] for item in recommendation["products"]})
+
+    assert len({frozenset(products) for products in product_sets}) == 3
 
 
 def test_oily_skin_does_not_recommend_moisturizer():

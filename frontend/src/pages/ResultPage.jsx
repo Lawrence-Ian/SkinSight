@@ -5,7 +5,6 @@ import { ArrowLeft, RotateCcw, Sun, Moon, ShoppingBag, Lightbulb, Phone, Chevron
 import { historyAPI } from '../utils/api'
 
 const META = {
-  acne:   { bg:'#FFE4E1', border:'#FFB2B2', color:'#C0504D', emoji:'🔴' },
   oily:   { bg:'#FFF9E6', border:'#FFE082', color:'#B8860B', emoji:'✨' },
   dry:    { bg:'#E8F4FD', border:'#90CAF9', color:'#1565C0', emoji:'💙' },
   normal: { bg:'#E8F5E9', border:'#A5D6A7', color:'#2E7D32', emoji:'💚' },
@@ -65,6 +64,14 @@ const Tips = ({ items }) => (
     ))}
   </ul>
 )
+
+function ProductImage({ product }) {
+  const [failed, setFailed] = useState(false)
+  if (!product.image_url || failed) {
+    return <div className="w-16 h-16 rounded-xl bg-skin-a1 bg-opacity-30 flex items-center justify-center text-center text-[10px] font-semibold text-skin-a2 flex-shrink-0 px-1">{product.brand || 'Product'}</div>
+  }
+  return <img src={product.image_url} alt={`${product.brand || ''} ${product.name}`} onError={() => setFailed(true)} className="w-16 h-16 rounded-xl object-contain bg-white flex-shrink-0" />
+}
 
 export default function ResultPage() {
   const { state } = useLocation()
@@ -160,12 +167,14 @@ export default function ResultPage() {
           <div className="space-y-2.5">
             {r.products.map((p, i) => (
               <div key={i} className="flex gap-3 p-3 bg-skin-bg rounded-2xl">
-                <div className="w-10 h-10 rounded-xl bg-skin-a1 bg-opacity-30 flex items-center justify-center text-lg flex-shrink-0">💊</div>
+                <ProductImage product={p} />
                 <div>
                   <p className="font-semibold text-sm text-skin-text">{p.name}</p>
+                  {p.brand && <p className="text-xs text-skin-muted">{p.brand}</p>}
                   <p className="text-xs text-skin-muted">{p.ingredient}</p>
                   <p className="text-xs text-skin-a2 font-medium mt-0.5">{p.purpose}</p>
                   {p.price_range && <p className="text-xs text-skin-muted mt-0.5">Typical price: {p.price_range}</p>}
+                  {p.product_url && <a href={p.product_url} target="_blank" rel="noreferrer" className="text-xs text-skin-a2 underline mt-1 inline-block">Verify product packaging</a>}
                 </div>
               </div>
             ))}
