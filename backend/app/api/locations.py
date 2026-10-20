@@ -7,6 +7,7 @@ Uses real-world clinic data and calculated distances.
 from fastapi import APIRouter, HTTPException, Query
 import httpx
 import time
+import asyncio
 from pydantic import BaseModel
 from math import radians, sin, cos, sqrt, atan2
 from typing import List
@@ -15,6 +16,9 @@ router = APIRouter()
 OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.nchc.org.tw/api/interpreter",
+    "https://overpass.osm.jp/api/interpreter",
 )
 MAX_SEARCH_RADIUS_KM = 5
 OVERPASS_CACHE_TTL_SECONDS = 300
@@ -87,25 +91,44 @@ def _normalize_osm_element(element, lat: float, lng: float):
 
 async def _fetch_osm_places(lat: float, lng: float, radius_km: int):
     radius_m = min(max(radius_km, 1), MAX_SEARCH_RADIUS_KM) * 1000
-    query = f"""
-[out:json][timeout:20];
+    queries = (
+        f"""[out:json][timeout:15];
 (
-  nwr(around:{radius_m},{lat},{lng})["amenity"~"pharmacy|clinic|hospital|doctors|outpatient"];
+  nwr(around:{radius_m},{lat},{lng})["amenity"~"clinic|hospital|doctors|outpatient"];
   nwr(around:{radius_m},{lat},{lng})["healthcare"~"clinic|dermatology|doctor|hospital|specialist|centre|center"];
+);
+out center tags;""",
+        f"""[out:json][timeout:15];
+(
+  nwr(around:{radius_m},{lat},{lng})["amenity"="pharmacy"];
   nwr(around:{radius_m},{lat},{lng})["shop"~"beauty|cosmetics|chemist|department_store|supermarket"];
 );
-out center tags;
-"""
+out center tags;"""
+    )
+
     async with httpx.AsyncClient(timeout=65, headers={"User-Agent": "SkinSight/2.0 nearby locations"}) as client:
-        last_error = None
-        for endpoint in OVERPASS_URLS:
-            try:
-                response = await client.get(endpoint, params={"data": query})
-                response.raise_for_status()
-                return response.json().get("elements", [])
-            except httpx.HTTPError as error:
-                last_error = error
-        raise last_error or httpx.HTTPError("No Overpass endpoint was available")
+        async def fetch_query(query):
+            last_error = None
+            for endpoint in OVERPASS_URLS:
+                try:
+                    response = await client.get(endpoint, params={"data": query}, timeout=25)
+                    response.raise_for_status()
+                    return response.json().get("elements", [])
+                except httpx.HTTPError as error:
+                    last_error = error
+            raise last_error or httpx.HTTPError("No Overpass endpoint was available")
+
+        results = await asyncio.gather(*(fetch_query(query) for query in queries), return_exceptions=True)
+        elements = []
+        errors = []
+        for result in results:
+            if isinstance(result, Exception):
+                errors.append(result)
+            else:
+                elements.extend(result)
+        if not elements and errors:
+            raise errors[0]
+        return elements
 
 # Real dermatology clinics worldwide (verified locations with actual dermatology departments)
 DERMATOLOGY_CLINICS = [
