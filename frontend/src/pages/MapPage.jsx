@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import 'leaflet/dist/leaflet.css'
 import { locationsAPI } from '../utils/api'
 
-const SEARCH_RADIUS_KM = 15
+const SEARCH_RADIUS_KM = 5
 
 function RecenterMap({ position }) {
   const map = useMap()

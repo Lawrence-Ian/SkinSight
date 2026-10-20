@@ -16,6 +16,7 @@ OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 )
+MAX_SEARCH_RADIUS_KM = 5
 OVERPASS_CACHE_TTL_SECONDS = 300
 _overpass_cache = {}
 
@@ -85,7 +86,7 @@ def _normalize_osm_element(element, lat: float, lng: float):
     }
 
 async def _fetch_osm_places(lat: float, lng: float, radius_km: int):
-    radius_m = min(max(radius_km, 1), 50) * 1000
+    radius_m = min(max(radius_km, 1), MAX_SEARCH_RADIUS_KM) * 1000
     query = f"""
 [out:json][timeout:20];
 (
@@ -194,7 +195,8 @@ async def get_nearby_places(
     if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
         raise HTTPException(status_code=400, detail="Invalid coordinates")
     
-    cache_key = (round(lat, 3), round(lng, 3), min(max(radius_km, 1), 50))
+    radius_km = min(max(radius_km, 1), MAX_SEARCH_RADIUS_KM)
+    cache_key = (round(lat, 3), round(lng, 3), radius_km)
     cached = _overpass_cache.get(cache_key)
     if cached and time.monotonic() - cached["created_at"] < OVERPASS_CACHE_TTL_SECONDS:
         clinics, stores = cached["clinics"], cached["stores"]
