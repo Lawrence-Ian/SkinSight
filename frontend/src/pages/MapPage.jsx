@@ -19,23 +19,53 @@ function PlacePopup({ place, type }) {
   const mapUrl = place.maps_url || `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}#map=18/${place.lat}/${place.lng}`
   return (
     <div className="min-w-[220px] text-sm">
-      <p className="font-semibold text-skin-text">{place.name}</p>
-      <p className="my-1 text-xs text-skin-muted">{place.desc || type}</p>
-      <p className="text-xs text-skin-muted">{Number(place.distance_km).toFixed(2)} km away</p>
-      <p className="text-xs text-skin-muted">{place.address}</p>
+      <p className="font-semibold !text-gray-900">{place.name}</p>
+      <p className="my-1 text-xs !text-gray-700">{place.desc || type}</p>
+      <p className="text-xs !text-gray-700">{Number(place.distance_km).toFixed(2)} km away (straight-line)</p>
+      <p className="text-xs !text-gray-700">{place.address}</p>
       <div className="mt-2 flex gap-1">
         <a
           href={`https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${place.lat}%2C${place.lng}`}
           target="_blank"
           rel="noreferrer"
-          className="flex-1 rounded bg-blue-600 px-2 py-1 text-center text-xs text-white"
+          className="flex-1 rounded bg-blue-600 px-2 py-1 text-center text-xs !text-white no-underline hover:bg-blue-700"
         >
           Directions
         </a>
-        <a href={mapUrl} target="_blank" rel="noreferrer" className="flex-1 rounded bg-emerald-600 px-2 py-1 text-center text-xs text-white">
+        <a href={mapUrl} target="_blank" rel="noreferrer" className="flex-1 rounded bg-emerald-600 px-2 py-1 text-center text-xs !text-white no-underline hover:bg-emerald-700">
           View
         </a>
       </div>
+    </div>
+  )
+}
+
+function PlaceList({ places, type, icon: Icon, colorClass, badgeClass }) {
+  return (
+    <div className="space-y-2">
+      <p className={`text-xs font-semibold uppercase tracking-wide ${colorClass}`}>
+        {type === 'clinic' ? '🏥 Clinics and healthcare' : '🛒 Shops and pharmacies'} ({places.length})
+      </p>
+      {places.map((place, index) => (
+        <a
+          key={`${type}-${place.place_id}`}
+          href={place.maps_url || `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}`}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-center gap-3 rounded-2xl border border-skin-border bg-skin-card p-3 shadow-sm transition-shadow hover:shadow-md"
+        >
+          <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl ${badgeClass}`}>
+            <Icon size={17} className={colorClass} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-skin-text">{index + 1}. {place.name}</p>
+            <p className="mt-0.5 truncate text-xs text-skin-muted">{place.address}</p>
+          </div>
+          <span className={`flex-shrink-0 text-xs font-semibold ${colorClass}`}>
+            {Number(place.distance_km).toFixed(2)} km
+          </span>
+        </a>
+      ))}
     </div>
   )
 }
@@ -46,12 +76,9 @@ export default function MapPage() {
   const [userPos, setUserPos] = useState(null)
   const [clinics, setClinics] = useState([])
   const [stores, setStores] = useState([])
-  const [nearestClinic, setNearestClinic] = useState(null)
-  const [nearestStore, setNearestStore] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [locationPermission, setLocationPermission] = useState('')
-  const [dataSource, setDataSource] = useState('')
 
   const fetchNearbyPlaces = async (lat, lng) => {
     const requestId = ++requestRef.current
@@ -62,17 +89,11 @@ export default function MapPage() {
       const nextStores = response.data.stores || []
       setClinics(nextClinics)
       setStores(nextStores)
-      setNearestClinic(nextClinics[0] || null)
-      setNearestStore(nextStores[0] || null)
-      setDataSource(response.data.source || 'openstreetmap')
     } catch (err) {
       if (requestId !== requestRef.current) return
       console.error('Failed to fetch nearby places:', err)
       setClinics([])
       setStores([])
-      setNearestClinic(null)
-      setNearestStore(null)
-      setDataSource('')
       setError('Nearby places could not be loaded. Check your connection and try again.')
     } finally {
       if (requestId === requestRef.current) setLoading(false)
@@ -104,9 +125,6 @@ export default function MapPage() {
       setUserPos(null)
       setClinics([])
       setStores([])
-      setNearestClinic(null)
-      setNearestStore(null)
-      setDataSource('')
       setLocationPermission(err.code === 1 ? 'denied' : 'unavailable')
       setError(err.code === 1
         ? 'Location access is blocked. Allow location access in your browser, then retry.'
@@ -118,31 +136,6 @@ export default function MapPage() {
   useEffect(() => {
     loadUserLocation()
   }, [])
-
-  const placeLink = place => place.maps_url || `https://www.openstreetmap.org/?mlat=${place.lat}&mlon=${place.lng}`
-  const renderPlaceList = (places, type) => places.map(place => (
-    <a
-      key={`${type}-${place.place_id}`}
-      href={placeLink(place)}
-      target="_blank"
-      rel="noreferrer"
-      className="flex items-center gap-3 rounded-2xl border border-skin-border bg-skin-card p-3 transition-colors hover:bg-skin-a1/20"
-    >
-      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl ${type === 'clinic' ? 'bg-indigo-100' : 'bg-emerald-100'}`}>
-        {type === 'clinic' ? <MapPin size={17} className="text-indigo-600" /> : <Store size={17} className="text-emerald-600" />}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-skin-text">{place.name}</p>
-        <p className={`mt-0.5 text-xs ${type === 'clinic' ? 'text-indigo-700' : 'text-emerald-700'}`}>
-          {type === 'clinic' ? 'Dermatology / healthcare' : 'Pharmacy / beauty store'}
-        </p>
-        <p className="mt-1 text-xs text-skin-muted">{place.address}</p>
-      </div>
-      <span className="flex-shrink-0 text-right text-xs font-semibold text-skin-a2">
-        {Number(place.distance_km).toFixed(2)} km
-      </span>
-    </a>
-  ))
 
   return (
     <div className="nearby-care-page flex flex-col bg-skin-bg app-screen">
@@ -196,35 +189,17 @@ export default function MapPage() {
         </div>
       )}
 
-      {!loading && !error && !nearestClinic && !nearestStore && (
+      {!loading && !error && !clinics.length && !stores.length && (
         <div className="border-t border-skin-border bg-skin-bg p-4 text-center text-skin-muted">
           No skincare shops or dermatology clinics found within {SEARCH_RADIUS_KM} km.
         </div>
       )}
 
-      {!loading && (clinics.length > 0 || stores.length > 0) && (
-        <div className="space-y-4 border-t border-skin-border bg-skin-bg px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-5">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-skin-muted">📍 Nearest Options</p>
-            <p className="mt-1 text-xs text-skin-muted">Distances are measured from your current location.</p>
-            {userPos && (
-              <p className="mt-1 text-xs text-skin-muted">
-                Location: {userPos.lat.toFixed(5)}, {userPos.lng.toFixed(5)} • Source: {dataSource === 'openstreetmap' ? 'OpenStreetMap' : dataSource}
-              </p>
-            )}
-          </div>
-          {clinics.length > 0 && (
-            <section>
-              <h2 className="mb-2 text-sm font-semibold text-skin-text">Clinics and healthcare ({clinics.length})</h2>
-              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">{renderPlaceList(clinics, 'clinic')}</div>
-            </section>
-          )}
-          {stores.length > 0 && (
-            <section>
-              <h2 className="mb-2 text-sm font-semibold text-skin-text">Shops and pharmacies ({stores.length})</h2>
-              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">{renderPlaceList(stores, 'store')}</div>
-            </section>
-          )}
+      {!loading && (clinics.length || stores.length) && (
+        <div className="space-y-3 border-t border-skin-border bg-skin-bg px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-skin-muted">📍 All nearby options, sorted nearest first</p>
+          <PlaceList places={clinics} type="clinic" icon={MapPin} colorClass="text-indigo-700" badgeClass="bg-indigo-100" />
+          <PlaceList places={stores} type="store" icon={Store} colorClass="text-emerald-700" badgeClass="bg-emerald-100" />
           {locationPermission === 'denied' && <p className="border-t border-skin-border pt-2 text-center text-xs text-skin-muted">💡 Enable location in your browser for the most accurate results</p>}
         </div>
       )}
