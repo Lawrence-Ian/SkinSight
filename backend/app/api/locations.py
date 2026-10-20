@@ -20,6 +20,7 @@ OVERPASS_URLS = (
     "https://overpass.nchc.org.tw/api/interpreter",
     "https://overpass.osm.jp/api/interpreter",
 )
+PHOTON_URL = "https://photon.komoot.io/api/"
 MAX_SEARCH_RADIUS_KM = 5
 OVERPASS_CACHE_TTL_SECONDS = 300
 _overpass_cache = {}
@@ -130,6 +131,61 @@ out center tags;"""
             raise errors[0]
         return elements
 
+async def _fetch_photon_places(lat: float, lng: float, radius_km: int):
+    queries = (
+        ("clinic", "clinic"),
+        ("hospital", "clinic"),
+        ("dermatology", "clinic"),
+        ("pharmacy", "store"),
+        ("beauty store", "store"),
+        ("cosmetics", "store"),
+    )
+    async with httpx.AsyncClient(
+        timeout=25,
+        headers={"User-Agent": "SkinSight/2.0 nearby locations"}
+    ) as client:
+        async def search(term, place_type):
+            response = await client.get(PHOTON_URL, params={
+                "q": term,
+                "lat": lat,
+                "lon": lng,
+                "limit": 20,
+                "lang": "en",
+            })
+            response.raise_for_status()
+            places = []
+            for feature in response.json().get("features", []):
+                coordinates = feature.get("geometry", {}).get("coordinates", [])
+                properties = feature.get("properties", {})
+                if len(coordinates) < 2:
+                    continue
+                place_lat, place_lng = float(coordinates[1]), float(coordinates[0])
+                places.append({
+                    "name": properties.get("name") or term.title(),
+                    "lat": place_lat,
+                    "lng": place_lng,
+                    "type": place_type,
+                    "desc": "OpenStreetMap-listed healthcare location." if place_type == "clinic"
+                        else "OpenStreetMap-listed pharmacy or beauty store. Confirm product stock before visiting.",
+                    "distance_km": round(get_distance(lat, lng, place_lat, place_lng), 2),
+                    "address": ", ".join(str(properties[key]) for key in ("street", "city", "state")
+                        if properties.get(key)) or "Address unavailable",
+                    "phone": "Phone unavailable",
+                    "place_id": f"photon/{properties.get('osm_type', 'unknown')}/{properties.get('osm_id', feature.get('id', 'unknown'))}",
+                    "maps_url": f"https://www.openstreetmap.org/?mlat={place_lat}&mlon={place_lng}",
+                    "source": "openstreetmap"
+                })
+            return places
+
+        results = await asyncio.gather(
+            *(search(term, place_type) for term, place_type in queries),
+            return_exceptions=True
+        )
+        places = [place for result in results if isinstance(result, list) for place in result]
+        if not places and all(isinstance(result, Exception) for result in results):
+            raise httpx.HTTPError("Photon search was unavailable")
+        return places
+
 # Real dermatology clinics worldwide (verified locations with actual dermatology departments)
 DERMATOLOGY_CLINICS = [
     # ═════════ PHILIPPINES - MANILA METRO ═════════
@@ -227,18 +283,22 @@ async def get_nearby_places(
         try:
             elements = await _fetch_osm_places(lat, lng, radius_km)
             normalized = [_normalize_osm_element(element, lat, lng) for element in elements]
-            places = [place for place in normalized if place and place["distance_km"] <= radius_km]
-            seen = set()
-            places = [place for place in places if not (place["place_id"] in seen or seen.add(place["place_id"]))]
-            clinics = sorted((place for place in places if place["type"] == "clinic"), key=lambda item: item["distance_km"])[:50]
-            stores = sorted((place for place in places if place["type"] == "store"), key=lambda item: item["distance_km"])[:50]
-            _overpass_cache[cache_key] = {"created_at": time.monotonic(), "clinics": clinics, "stores": stores}
-        except (httpx.HTTPError, ValueError) as error:
-            print(f"OpenStreetMap nearby search failed: {error}")
-            raise HTTPException(
-                status_code=503,
-                detail="Live OpenStreetMap nearby search is temporarily unavailable. No substitute locations were returned."
-            ) from error
+        except httpx.HTTPError as overpass_error:
+            print(f"Overpass nearby search failed; trying Photon: {overpass_error}")
+            try:
+                normalized = await _fetch_photon_places(lat, lng, radius_km)
+            except httpx.HTTPError as photon_error:
+                print(f"Photon nearby search failed: {photon_error}")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Live OpenStreetMap nearby search is temporarily unavailable. No substitute locations were returned."
+                ) from photon_error
+        places = [place for place in normalized if place and place["distance_km"] <= radius_km]
+        seen = set()
+        places = [place for place in places if not (place["place_id"] in seen or seen.add(place["place_id"]))]
+        clinics = sorted((place for place in places if place["type"] == "clinic"), key=lambda item: item["distance_km"])[:50]
+        stores = sorted((place for place in places if place["type"] == "store"), key=lambda item: item["distance_km"])[:50]
+        _overpass_cache[cache_key] = {"created_at": time.monotonic(), "clinics": clinics, "stores": stores}
 
     if not clinics and not stores:
         return {
