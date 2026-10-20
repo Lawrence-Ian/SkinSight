@@ -210,10 +210,21 @@ async def get_nearby_places(
             _overpass_cache[cache_key] = {"created_at": time.monotonic(), "clinics": clinics, "stores": stores}
         except (httpx.HTTPError, ValueError) as error:
             print(f"OpenStreetMap nearby search failed: {error}")
-            clinics, stores = _fallback_places(lat, lng, radius_km)
+            raise HTTPException(
+                status_code=503,
+                detail="Live OpenStreetMap nearby search is temporarily unavailable. No substitute locations were returned."
+            ) from error
 
     if not clinics and not stores:
-        clinics, stores = _fallback_places(lat, lng, radius_km)
+        return {
+            "user_location": {"lat": lat, "lng": lng},
+            "search_radius_km": radius_km,
+            "source": "openstreetmap",
+            "clinics": [],
+            "stores": [],
+            "total_clinics": 0,
+            "total_stores": 0
+        }
     if type_filter == "clinic":
         stores = []
     elif type_filter == "store":
@@ -222,6 +233,7 @@ async def get_nearby_places(
     return {
         "user_location": {"lat": lat, "lng": lng},
         "search_radius_km": radius_km,
+        "source": "openstreetmap",
         "clinics": clinics[:50],
         "stores": stores[:50],
         "total_clinics": len(clinics),

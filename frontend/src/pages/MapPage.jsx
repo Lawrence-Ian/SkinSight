@@ -51,6 +51,7 @@ export default function MapPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [locationPermission, setLocationPermission] = useState('')
+  const [dataSource, setDataSource] = useState('')
 
   const fetchNearbyPlaces = async (lat, lng) => {
     const requestId = ++requestRef.current
@@ -63,6 +64,7 @@ export default function MapPage() {
       setStores(nextStores)
       setNearestClinic(nextClinics[0] || null)
       setNearestStore(nextStores[0] || null)
+      setDataSource(response.data.source || 'openstreetmap')
     } catch (err) {
       if (requestId !== requestRef.current) return
       console.error('Failed to fetch nearby places:', err)
@@ -70,6 +72,7 @@ export default function MapPage() {
       setStores([])
       setNearestClinic(null)
       setNearestStore(null)
+      setDataSource('')
       setError('Nearby places could not be loaded. Check your connection and try again.')
     } finally {
       if (requestId === requestRef.current) setLoading(false)
@@ -103,6 +106,7 @@ export default function MapPage() {
       setStores([])
       setNearestClinic(null)
       setNearestStore(null)
+      setDataSource('')
       setLocationPermission(err.code === 1 ? 'denied' : 'unavailable')
       setError(err.code === 1
         ? 'Location access is blocked. Allow location access in your browser, then retry.'
@@ -203,6 +207,11 @@ export default function MapPage() {
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-skin-muted">📍 Nearest Options</p>
             <p className="mt-1 text-xs text-skin-muted">Distances are measured from your current location.</p>
+            {userPos && (
+              <p className="mt-1 text-xs text-skin-muted">
+                Location: {userPos.lat.toFixed(5)}, {userPos.lng.toFixed(5)} • Source: {dataSource === 'openstreetmap' ? 'OpenStreetMap' : dataSource}
+              </p>
+            )}
           </div>
           {clinics.length > 0 && (
             <section>
