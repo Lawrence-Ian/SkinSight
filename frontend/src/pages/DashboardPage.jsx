@@ -409,7 +409,6 @@ export default function DashboardPage({ scannerOnly = false }) {
           <section className="analysis-details">
             <div className="analysis-intro"><h2>Position your face</h2><p>Center your face in the oval guide. The AI will scan multiple skin parameters in real time.</p></div>
             <section className="analysis-panel detection-panel"><h3>Live Detection Status</h3><div><span>Face Position</span><b className={`detection-${detection.facePosition.toLowerCase().replaceAll(' ', '-')}`}>{detection.facePosition}</b></div><div><span>Lighting Quality</span><b className={`detection-${detection.lighting.toLowerCase().replaceAll(' ', '-')}`}>{detection.lighting}</b></div><div><span>Image Clarity</span><b className={`detection-${detection.clarity.toLowerCase()}`}>{detection.clarity}</b></div><div><span>Distance</span><b className={`detection-${detection.distance.toLowerCase().replaceAll(' ', '-')}`}>{detection.distance}</b></div></section>
-            <section className="analysis-panel"><h3>What we analyze</h3><div className="analysis-tags"><span>🔬 Skin Type</span><span>🎨 Skin Tone</span><span>💧 Hydration</span><span>✨ Texture</span><span>🔴 Redness</span><span>🫧 Pores</span></div></section>
             <section className="analysis-panel analysis-tip"><Crosshair /><div><h3>For best results</h3><p>Look directly at the camera with a neutral expression. Avoid strong shadows across your face.</p></div></section>
           </section>
         </div>
