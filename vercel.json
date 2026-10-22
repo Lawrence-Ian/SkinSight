@@ -1,7 +1,7 @@
 {
-  "buildCommand": "npm --prefix frontend run build --workspaces=false",
-  "installCommand": "npm --prefix frontend ci --workspaces=false",
-  "outputDirectory": "frontend/dist",
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci",
+  "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/api/:path*",
