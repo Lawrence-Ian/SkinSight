@@ -1,6 +1,6 @@
 {
-  "buildCommand": "npm --prefix frontend run build",
-  "installCommand": "npm --prefix frontend ci",
+  "buildCommand": "npm --prefix frontend run build --workspaces=false",
+  "installCommand": "npm --prefix frontend ci --workspaces=false",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
