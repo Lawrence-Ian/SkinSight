@@ -1,151 +1,298 @@
-"""
-SKINSIGHT v2 — Locations API
-Returns nearby clinics and skincare stores based on user coordinates.
-Uses real-world clinic data and calculated distances.
-"""
+"""Nearby clinic and shop search using OpenStreetMap data."""
 
+import asyncio
+import logging
+from math import atan2, cos, radians, sin, sqrt
+from time import monotonic
+
+import httpx
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
-from math import radians, sin, cos, sqrt, atan2
-from typing import List
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+OVERPASS_ENDPOINTS = (
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+)
+OVERPASS_REQUEST_TIMEOUTS = (12.0, 8.0, 8.0)
+NOMINATIM_ENDPOINT = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_SEARCH_TERMS = {
+    "clinic": ("clinic", "hospital"),
+    "store": ("pharmacy", "beauty"),
+}
+NOMINATIM_REQUEST_INTERVAL = 1.1
+NOMINATIM_CACHE_SECONDS = 300
+MAX_RESULTS = 5
+_nominatim_request_lock = asyncio.Lock()
+_nominatim_last_request = 0.0
+_nominatim_cache = {}
 
-# Haversine distance formula (km)
+
 def get_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    R = 6371  # Earth's radius in km
-    dLat = radians(lat2 - lat1)
-    dLng = radians(lng2 - lng1)
-    a = sin(dLat/2) * sin(dLat/2) + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLng/2) * sin(dLng/2)
-    c = 2 * atan2(sqrt(a), sqrt(1-a))
-    return R * c
+    """Return the great-circle distance between two coordinates in kilometers."""
+    earth_radius_km = 6371
+    lat_distance = radians(lat2 - lat1)
+    lng_distance = radians(lng2 - lng1)
+    haversine = (
+        sin(lat_distance / 2) ** 2
+        + cos(radians(lat1)) * cos(radians(lat2)) * sin(lng_distance / 2) ** 2
+    )
+    return earth_radius_km * 2 * atan2(sqrt(haversine), sqrt(1 - haversine))
 
-# Real dermatology clinics worldwide (verified locations with actual dermatology departments)
-DERMATOLOGY_CLINICS = [
-    # ═════════ PHILIPPINES - MANILA METRO ═════════
-    {"name": "Makati Medical Center - Dermatology", "lat": 14.5520, "lng": 121.0245, "type": "clinic", "desc": "Tertiary hospital with board-certified dermatologists. Laser, acne, and eczema treatments.", "address": "2 Amorsolo St, Makati City", "phone": "+63-2-8519-9999"},
-    {"name": "St. Luke's Medical Center QC - Dermatology", "lat": 14.6339, "lng": 121.0551, "type": "clinic", "desc": "Specialist dermatologists with modern equipment. Skin cancer screening.", "address": "E. Rodriguez Sr. Ave, Quezon City", "phone": "+63-2-8723-0101"},
-    {"name": "Philippine General Hospital - Dermatology Dept", "lat": 14.5916, "lng": 120.9851, "type": "clinic", "desc": "University of the Philippines teaching hospital. Comprehensive skin care.", "address": "Taft Ave, Manila", "phone": "+63-2-8526-0800"},
-    {"name": "Skin Doctors Dermatology Clinic", "lat": 14.5547, "lng": 121.0243, "type": "clinic", "desc": "Specialized dermatology practice. Acne, aging skin, laser treatments.", "address": "Makati Avenue, Makati City", "phone": "+63-2-8810-2222"},
-    {"name": "Asian Hospital and Medical Center - Dermatology", "lat": 14.4181, "lng": 120.9359, "type": "clinic", "desc": "Modern healthcare facility. Full dermatology services in Muntinlupa.", "address": "Alabang, Muntinlupa", "phone": "+63-2-8771-9000"},
-    {"name": "Chong Hua Hospital - Dermatology", "lat": 14.5880, "lng": 121.0180, "type": "clinic", "desc": "Specialist dermatologists. Skin treatments and consultations.", "address": "Villarosa St, Ermita Manila", "phone": "+63-2-5254-8888"},
-    {"name": "De los Santos Medical Center - Dermatology", "lat": 14.6200, "lng": 121.0150, "type": "clinic", "desc": "Dermatology services with experienced consultants.", "address": "Quirino Ave, Manila", "phone": "+63-2-7310-0000"},
-    
-    # ═════════ PHILIPPINES - OTHER REGIONS ═════════
-    {"name": "Cebu Doctor's Hospital - Dermatology", "lat": 10.3199, "lng": 123.8854, "type": "clinic", "desc": "Cebu's premier hospital with dermatology department.", "address": "North Reclamation Area, Cebu City", "phone": "+63-32-232-8888"},
-    {"name": "Davao Medical School Foundation Hospital - Dermatology", "lat": 6.9271, "lng": 125.4092, "type": "clinic", "desc": "Mindanao's leading dermatology center.", "address": "JP Laurel Ave, Davao City", "phone": "+63-82-226-5000"},
-    
-    # ═════════ INTERNATIONAL - USA ═════════
-    {"name": "Mount Sinai Dermatology - New York", "lat": 40.7906, "lng": -73.9593, "type": "clinic", "desc": "Ivy League medical center. Advanced dermatology and skin cancer treatment.", "address": "5E 98th St, New York", "phone": "+1-212-241-3288"},
-    {"name": "NYU Langone Dermatology - Manhattan", "lat": 40.7395, "lng": -73.9803, "type": "clinic", "desc": "Leading academic medical center. Specialized skin and hair treatments.", "address": "455 First Ave, New York", "phone": "+1-212-731-5000"},
-    {"name": "Laser & Skin Surgery Center - New York", "lat": 40.7680, "lng": -73.9776, "type": "clinic", "desc": "Specialist clinic for laser and cosmetic dermatology.", "address": "317 E 34th St, New York", "phone": "+1-212-686-5000"},
-    {"name": "UCLA Dermatology - Los Angeles", "lat": 34.0728, "lng": -118.4453, "type": "clinic", "desc": "World-renowned university dermatology practice.", "address": "10833 Le Conte Ave, Los Angeles", "phone": "+1-310-825-6921"},
-    {"name": "Stanford Dermatology - San Francisco Bay Area", "lat": 37.4419, "lng": -122.1430, "type": "clinic", "desc": "Prestigious medical school dermatology department.", "address": "Palo Alto, California", "phone": "+1-650-723-6316"},
-]
 
-# Skincare retail stores (real pharmacy & beauty chains)
-SKINCARE_STORES = [
-    # ═════════ PHILIPPINES - WATSONS (Largest pharmacy chain) ═════════
-    {"name": "Watsons - SM Megamall", "lat": 14.5854, "lng": 121.0562, "type": "store", "desc": "Premium pharmacy. CeraVe, La Roche-Posay, Cetaphil, Neutrogena, AcneFree, Olay.", "address": "SM Megamall, Mandaluyong", "phone": "+63-2-6318-1000"},
-    {"name": "Watsons - Greenbelt 5", "lat": 14.5521, "lng": 121.0255, "type": "store", "desc": "Upscale pharmacy in Makati. Full skincare range. Expert consultations.", "address": "Greenbelt 5, Makati", "phone": "+63-2-7729-4000"},
-    {"name": "Watsons - Robinsons Galleria", "lat": 14.6114, "lng": 121.0353, "type": "store", "desc": "Modern pharmacy with extensive skincare selection for oily, dry, and combination skin.", "address": "Robinsons Galleria, Quezon City", "phone": "+63-2-6318-2000"},
-    {"name": "Watsons - BGC", "lat": 14.5540, "lng": 121.5480, "type": "store", "desc": "Newest Watsons location with full skincare inventory.", "address": "Fort Bonifacio, Taguig", "phone": "+63-2-8887-7777"},
-    
-    # ═════════ PHILIPPINES - MERCURY DRUG (Prescription pharmacy) ═════════
-    {"name": "Mercury Drug - Makati Main", "lat": 14.5622, "lng": 121.0179, "type": "store", "desc": "Prescription pharmacy with skincare essentials. CeraVe, Physiogel, Cetaphil available.", "address": "Ayala Ave, Makati", "phone": "+63-2-8310-0811"},
-    {"name": "Mercury Drug - SM Makati", "lat": 14.5854, "lng": 121.0245, "type": "store", "desc": "Full-service pharmacy with OTC and prescription skincare.", "address": "SM Makati, Makati City", "phone": "+63-2-8811-0811"},
-    {"name": "Mercury Drug - Quiapo", "lat": 14.6011, "lng": 120.9798, "type": "store", "desc": "Central Manila pharmacy. Skincare and remedies available.", "address": "Quiapo, Manila", "phone": "+63-2-8254-7788"},
-    
-    # ═════════ PHILIPPINES - GUARDIAN PHARMACY ═════════
-    {"name": "Guardian - SM Manila", "lat": 14.5833, "lng": 120.9817, "type": "store", "desc": "Pharmacy chain. Quality skincare products for all skin types.", "address": "SM Manila, Manila", "phone": "+63-2-5246-3456"},
-    {"name": "Guardian - Paseo de Santa Rosa", "lat": 14.5611, "lng": 121.0189, "type": "store", "desc": "Full pharmacy with dermatologist-recommended skincare.", "address": "Paseo de Santa Rosa, Makati", "phone": "+63-2-7889-1234"},
-    
-    # ═════════ PHILIPPINES - PREMIUM SKINCARE RETAILERS ═════════
-    {"name": "Sephora - Rustans Makati", "lat": 14.5574, "lng": 121.0239, "type": "store", "desc": "Premium beauty store. Estée Lauder, Fenty, Clinique, Shiseido, MAC, Urban Decay.", "address": "Rustans Makati, Makati City", "phone": "+63-2-8811-1500"},
-    {"name": "Sephora - SM Mall of Asia", "lat": 14.5530, "lng": 120.8833, "type": "store", "desc": "Large Sephora with full range of international beauty brands.", "address": "SM Mall of Asia, Pasay", "phone": "+63-2-5551-1000"},
-    {"name": "The Body Shop - SM Megamall", "lat": 14.5854, "lng": 121.0562, "type": "store", "desc": "Natural skincare and body care products. Vegan and eco-friendly options.", "address": "SM Megamall, Mandaluyong", "phone": "+63-2-6356-9090"},
-    {"name": "Avida - SM Makati", "lat": 14.5854, "lng": 121.0245, "type": "store", "desc": "Korean beauty and skincare specialists. Popular brands like Etude House, Innisfree, Laneige.", "address": "SM Makati, Makati City", "phone": "+63-2-8816-8800"},
-    
-    # ═════════ PHILIPPINES - OTHER REGIONS ═════════
-    {"name": "Watsons - Ayala Cebu", "lat": 10.3207, "lng": 123.8899, "type": "store", "desc": "Cebu's premium pharmacy with complete skincare selection.", "address": "Ayala Center Cebu, Cebu City", "phone": "+63-32-238-0001"},
-    {"name": "Mercury Drug - Davao", "lat": 6.9271, "lng": 125.4092, "type": "store", "desc": "Mindanao's largest pharmacy chain. Full skincare range.", "address": "JP Laurel Ave, Davao City", "phone": "+63-82-221-7777"},
-    
-    # ═════════ INTERNATIONAL - USA ═════════
-    {"name": "Sephora - Fifth Avenue NYC", "lat": 40.7580, "lng": -73.9855, "type": "store", "desc": "Flagship beauty store. Every major cosmetics and skincare brand available.", "address": "5th Ave, Manhattan, New York", "phone": "+1-212-980-6534"},
-    {"name": "Ulta Beauty - New York", "lat": 40.7614, "lng": -73.9776, "type": "store", "desc": "Large beauty retailer with drugstore and premium skincare. Brands: Clinique, MAC, Estée Lauder, CeraVe, Cetaphil.", "address": "Times Square, New York", "phone": "+1-212-956-8080"},
-    {"name": "CVS Pharmacy - Times Square", "lat": 40.7608, "lng": -73.9840, "type": "store", "desc": "Drugstore with full skincare selection. CeraVe, Neutrogena, Olay, Aveeno, Cetaphil.", "address": "Times Square, New York", "phone": "+1-212-382-1300"},
-    {"name": "Walgreens - Manhattan", "lat": 40.7500, "lng": -73.9900, "type": "store", "desc": "Pharmacy chain with comprehensive skincare range.", "address": "New York, NY", "phone": "+1-212-391-4270"},
-    {"name": "Sephora - Los Angeles", "lat": 34.0689, "lng": -118.2808, "type": "store", "desc": "LA's premier beauty store with all major skincare brands.", "address": "Beverly Hills, Los Angeles", "phone": "+1-310-247-9500"},
-]
+async def get_nominatim_places(lat: float, lng: float, radius_km: int, type_filter: str):
+    """Search Nominatim as a rate-limited fallback when Overpass is unavailable."""
+    global _nominatim_last_request
 
-class LocationRequest(BaseModel):
-    lat: float
-    lng: float
-    radius_km: int = 100  # Search radius in km
+    cache_key = (round(lat, 4), round(lng, 4), radius_km, type_filter)
+    cached = _nominatim_cache.get(cache_key)
+    if cached and monotonic() - cached[0] < NOMINATIM_CACHE_SECONDS:
+        return cached[1]
 
-class PlaceItem(BaseModel):
-    name: str
-    lat: float
-    lng: float
-    type: str
-    desc: str
-    distance_km: float
-    address: str
-    phone: str
+    latitude_delta = radius_km / 110.574
+    longitude_delta = radius_km / (111.320 * max(cos(radians(lat)), 0.01))
+    viewbox = ",".join(str(value) for value in (
+        max(-180, lng - longitude_delta),
+        min(90, lat + latitude_delta),
+        min(180, lng + longitude_delta),
+        max(-90, lat - latitude_delta),
+    ))
+    search_terms = []
+    if type_filter in {"all", "clinic"}:
+        search_terms.extend(NOMINATIM_SEARCH_TERMS["clinic"])
+    if type_filter in {"all", "store"}:
+        search_terms.extend(NOMINATIM_SEARCH_TERMS["store"])
+
+    results = []
+    seen = set()
+    async with httpx.AsyncClient(
+        headers={"User-Agent": "SkinSight/2.0 nearby-care map"},
+    ) as client:
+        for term in search_terms:
+            async with _nominatim_request_lock:
+                wait_seconds = NOMINATIM_REQUEST_INTERVAL - (monotonic() - _nominatim_last_request)
+                if wait_seconds > 0:
+                    await asyncio.sleep(wait_seconds)
+                _nominatim_last_request = monotonic()
+                response = await client.get(
+                    NOMINATIM_ENDPOINT,
+                    params={
+                        "format": "jsonv2",
+                        "q": term,
+                        "viewbox": viewbox,
+                        "bounded": 1,
+                        "limit": 20,
+                        "addressdetails": 1,
+                        "extratags": 1,
+                    },
+                    timeout=httpx.Timeout(10.0, connect=5.0),
+                )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise ValueError("Nominatim returned an invalid response")
+
+            for element in payload:
+                if not isinstance(element, dict):
+                    continue
+                osm_type = element.get("osm_type")
+                osm_id = element.get("osm_id")
+                key = (osm_type, osm_id)
+                if osm_type not in {"node", "way", "relation"} or osm_id is None or key in seen:
+                    continue
+                seen.add(key)
+                results.append(element)
+
+    _nominatim_cache[cache_key] = (monotonic(), results)
+    expired_keys = [
+        key for key, (cached_at, _) in _nominatim_cache.items()
+        if monotonic() - cached_at >= NOMINATIM_CACHE_SECONDS
+    ]
+    for key in expired_keys:
+        _nominatim_cache.pop(key, None)
+    if len(_nominatim_cache) > 256:
+        _nominatim_cache.pop(next(iter(_nominatim_cache)))
+    return results
+
 
 @router.get("/nearby", response_model=dict)
 async def get_nearby_places(
     lat: float = Query(..., description="User latitude"),
     lng: float = Query(..., description="User longitude"),
-    radius_km: int = Query(100, description="Search radius in km"),
-    type_filter: str = Query("all", description="Filter by 'clinic', 'store', or 'all'")
+    radius_km: int = Query(5, description="Search radius in km"),
+    type_filter: str = Query("all", description="Filter by 'clinic', 'store', or 'all'"),
 ):
-    """
-    Get nearby dermatology clinics and skincare stores.
-    
-    Returns sorted list by distance.
-    """
     if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
         raise HTTPException(status_code=400, detail="Invalid coordinates")
-    
+    if type_filter not in {"all", "clinic", "store"}:
+        raise HTTPException(status_code=400, detail="Invalid type_filter")
+    if not 1 <= radius_km <= 5:
+        raise HTTPException(status_code=400, detail="radius_km must be between 1 and 5")
+
+    queries = []
+    radius_meters = radius_km * 1000
+    if type_filter in {"all", "store"}:
+        queries.append(f"""
+          nwr(around:{radius_meters},{lat},{lng})["shop"~"^(beauty|chemist|cosmetics|health_food|pharmacy)$"];
+          nwr(around:{radius_meters},{lat},{lng})["amenity"="pharmacy"];
+          nwr(around:{radius_meters},{lat},{lng})["healthcare"="pharmacy"];
+        """)
+    if type_filter in {"all", "clinic"}:
+        queries.append(f"""
+          nwr(around:{radius_meters},{lat},{lng})["amenity"~"^(clinic|hospital|doctors)$"];
+          nwr(around:{radius_meters},{lat},{lng})["healthcare"~"^(clinic|hospital|doctor)$"];
+        """)
+    overpass_query = f"[out:json][timeout:10];({''.join(queries)});out center tags;"
+
+    elements = None
+    last_error = None
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(12.0, connect=5.0),
+        headers={"User-Agent": "SkinSight/2.0 nearby-care map"},
+    ) as client:
+        for endpoint, timeout_seconds in zip(
+            OVERPASS_ENDPOINTS,
+            OVERPASS_REQUEST_TIMEOUTS,
+        ):
+            try:
+                response = await client.post(
+                    endpoint,
+                    data={"data": overpass_query},
+                    timeout=httpx.Timeout(timeout_seconds, connect=5.0),
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict) or not isinstance(payload.get("elements"), list):
+                    raise ValueError("Overpass returned an invalid response")
+                elements = payload["elements"]
+                break
+            except Exception as exc:
+                last_error = exc
+                logger.warning("OpenStreetMap provider %s failed: %s", endpoint, exc)
+
+    data_source = "openstreetmap"
+    if elements is None:
+        logger.warning("All Overpass providers failed; trying Nominatim")
+        try:
+            elements = await get_nominatim_places(
+                lat,
+                lng,
+                radius_km,
+                type_filter,
+            )
+            data_source = "openstreetmap-nominatim"
+        except Exception as exc:
+            logger.warning("Nominatim nearby search failed: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="OpenStreetMap search providers are temporarily unavailable or slow. Please retry shortly.",
+                headers={"Retry-After": "30"},
+            ) from exc
+
     clinics = []
     stores = []
-    
-    # Filter and sort clinics
-    if type_filter in ["all", "clinic"]:
-        for clinic in DERMATOLOGY_CLINICS:
-            dist = get_distance(lat, lng, clinic['lat'], clinic['lng'])
-            if dist <= radius_km:
-                clinics.append({
-                    **clinic,
-                    "distance_km": round(dist, 1)
-                })
-        clinics.sort(key=lambda x: x['distance_km'])
-    
-    # Filter and sort stores
-    if type_filter in ["all", "store"]:
-        for store in SKINCARE_STORES:
-            dist = get_distance(lat, lng, store['lat'], store['lng'])
-            if dist <= radius_km:
-                stores.append({
-                    **store,
-                    "distance_km": round(dist, 1)
-                })
-        stores.sort(key=lambda x: x['distance_km'])
-    
+    seen = set()
+    for element in elements:
+        if not isinstance(element, dict):
+            continue
+        tags = element.get("tags", {})
+        if not isinstance(tags, dict):
+            tags = {}
+        is_nominatim = data_source == "openstreetmap-nominatim"
+        point = element if is_nominatim else element.get("center", element)
+        if not isinstance(point, dict):
+            continue
+        element_lat = point.get("lat")
+        element_lng = point.get("lon")
+        if is_nominatim:
+            category = element.get("category")
+            osm_place_type = element.get("type")
+            is_clinic = (
+                category in {"amenity", "healthcare"}
+                and osm_place_type in {"clinic", "hospital", "doctor", "doctors"}
+            )
+            is_store = (
+                category in {"amenity", "healthcare"} and osm_place_type == "pharmacy"
+            ) or (
+                category == "shop"
+                and osm_place_type in {"beauty", "chemist", "cosmetics", "health_food", "pharmacy"}
+            )
+            if not is_clinic and not is_store:
+                continue
+            place_type = "clinic" if is_clinic else "store"
+            tags = element.get("extratags", {})
+            if not isinstance(tags, dict):
+                tags = {}
+        else:
+            is_clinic = (
+                tags.get("amenity") in {"clinic", "hospital", "doctors"}
+                or tags.get("healthcare") in {"clinic", "hospital", "doctor"}
+            )
+            place_type = "clinic" if is_clinic else "store"
+        if element_lat is None or element_lng is None:
+            continue
+        try:
+            element_lat = float(element_lat)
+            element_lng = float(element_lng)
+        except (TypeError, ValueError):
+            continue
+        if not (-90 <= element_lat <= 90) or not (-180 <= element_lng <= 180):
+            continue
+
+        distance_km = get_distance(lat, lng, element_lat, element_lng)
+        if distance_km >= radius_km:
+            continue
+
+        key = (
+            place_type,
+            element.get("osm_type") if is_nominatim else element.get("type"),
+            element.get("osm_id") if is_nominatim else element.get("id"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+
+        address = element.get("display_name") if is_nominatim else None
+        if not address:
+            address_parts = [
+                tags.get("addr:housenumber"),
+                tags.get("addr:street"),
+                tags.get("addr:city") or tags.get("addr:town"),
+            ]
+            address = ", ".join(part for part in address_parts if part) or tags.get(
+                "addr:full",
+                "Address unavailable",
+            )
+        osm_type = element.get("osm_type") if is_nominatim else element.get("type")
+        osm_id = element.get("osm_id") if is_nominatim else element.get("id")
+        place = {
+            "name": element.get("name") or tags.get("name") or (
+                "Clinic or hospital" if is_clinic else "Skincare shop or pharmacy"
+            ),
+            "lat": element_lat,
+            "lng": element_lng,
+            "type": place_type,
+            "desc": tags.get("description") or (
+                "Clinic or hospital listed on OpenStreetMap."
+                if is_clinic
+                else "Skincare shop or pharmacy listed on OpenStreetMap."
+            ),
+            "distance_km": round(distance_km, 2),
+            "address": address,
+            "phone": tags.get("phone") or tags.get("contact:phone", "Phone unavailable"),
+            "osm_url": f"https://www.openstreetmap.org/{osm_type}/{osm_id}",
+        }
+        (clinics if is_clinic else stores).append(place)
+
+    clinics.sort(key=lambda item: get_distance(lat, lng, item["lat"], item["lng"]))
+    stores.sort(key=lambda item: get_distance(lat, lng, item["lat"], item["lng"]))
     return {
         "user_location": {"lat": lat, "lng": lng},
         "search_radius_km": radius_km,
-        "clinics": clinics[:10],  # Top 10 nearest clinics
-        "stores": stores[:10],    # Top 10 nearest stores
+        "data_source": data_source,
+        "clinics": clinics[:MAX_RESULTS],
+        "stores": stores[:MAX_RESULTS],
         "total_clinics": len(clinics),
-        "total_stores": len(stores)
-    }
-
-@router.get("/all")
-async def get_all_places():
-    """Get all clinics and stores (for map initialization)."""
-    return {
-        "clinics": DERMATOLOGY_CLINICS,
-        "stores": SKINCARE_STORES
+        "total_stores": len(stores),
     }

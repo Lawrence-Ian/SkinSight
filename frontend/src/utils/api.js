@@ -69,6 +69,5 @@ export const routineAPI  = {
   saveProgress: (scanId, progress) => api.put(`/api/history/${scanId}/routine-progress`, progress)
 }
 export const locationsAPI = { 
-  nearby: (lat, lng, radius = 100) => api.get('/api/locations/nearby', { params: { lat, lng, radius_km: radius } }),
-  all: () => api.get('/api/locations/all')
+  nearby: (lat, lng, radius = 5) => withRetry(() => api.get('/api/locations/nearby', { params: { lat, lng, radius_km: radius } }), 1)
 }

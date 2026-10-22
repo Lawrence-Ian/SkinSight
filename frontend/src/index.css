@@ -83,6 +83,18 @@
 .dashboard-stats:has(> article:only-child) { grid-template-columns:1fr; }
 .dashboard-empty { margin:0; padding:18px 2px 8px; color:var(--muted); font-size:.82rem; line-height:1.5; }
 .analysis-chip.is-invalid { background:#b94b56; }
+.nearby-care-marker,
+.nearby-care-user-marker { background:transparent; border:0; }
+.nearby-care-marker span,
+.nearby-care-user-marker span { display:block; width:18px; height:18px; border:3px solid #fff; border-radius:50%; box-shadow:0 1px 5px rgba(35,25,20,.35); }
+.nearby-care-user-marker span { width:16px; height:16px; background:#3b82f6; box-shadow:0 0 0 5px rgba(59,130,246,.22),0 1px 5px rgba(35,25,20,.35); }
+.nearby-care-popup { min-width:210px; display:flex; flex-direction:column; gap:5px; font-family:'DM Sans',sans-serif; font-size:12px; }
+.nearby-care-popup strong { color:#1e3a8a; font-size:14px; }
+.nearby-care-popup span { color:#666; }
+.nearby-care-popup div { display:flex; gap:6px; margin-top:4px; }
+.nearby-care-popup a { flex:1; padding:6px 7px; border-radius:4px; background:#1e3a8a; color:#fff; text-align:center; text-decoration:none; font-size:11px; }
+.nearby-care-popup a:last-child { background:#059669; }
+
 @media (max-width:700px) {
 	.app-shell { display:block; }
 	.app-sidebar { display:none; }
